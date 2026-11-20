@@ -1,0 +1,23 @@
+id,name,area,duration,predecessors,baseline_finish
+A100,Notice to proceed,Milestone,0,,2026-01-05
+A110,Install CUB chillers,CUB,40,A100,2026-02-14
+A120,Install PCW pumps and headers,CUB,25,A110SS+15,2026-02-14
+A130,Flush and test PCW loop,PCW,10,A120,2026-02-24
+A140,PCW available to fab (milestone),PCW,0,A130,2026-02-24
+A200,Install UPW pretreatment,UPW,35,A100,2026-02-09
+A210,Install UPW polish loop,UPW,30,A200,2026-03-04
+A220,UPW loop rinse to spec,UPW,21,A210,2026-03-25
+A230,UPW available to fab (milestone),UPW,0,A220,2026-03-25
+A300,Install bulk gas yard (N2 CDA),Gas,30,A100,2026-02-04
+A310,Run bulk N2 and CDA mains to subfab,Gas,20,A300,2026-02-24
+A320,Purge and certify gas mains,Gas,7,A310,2026-03-03
+A330,Bulk gas available to fab (milestone),Gas,0,A320,2026-03-03
+A400,Install scrubbed exhaust ducts,Exhaust,30,A100,2026-02-04
+A410,Start up exhaust fans and balance,Exhaust,10,A400;A140,2026-03-06
+A420,Exhaust available to fab (milestone),Exhaust,0,A410,2026-03-06
+A500,Energize substation and UPS,Electrical,45,A100,2026-02-19
+A510,Electrical available to fab (milestone),Electrical,0,A500,2026-02-19
+A600,Tool move-in (litho bay),Tool,5,A510;A330,2026-03-08
+A610,Tool hook-up (litho bay),Tool,15,A600;A140;A230;A420FS+2,2026-04-09
+A620,Tool qualification (litho bay),Tool,20,A610,2026-04-29
+A630,Ready for production (litho bay),Milestone,0,A620,2026-04-29
