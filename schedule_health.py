@@ -23,8 +23,11 @@ work calendars, which change the date math but not the logic.
 import re
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
+
+HERE = Path(__file__).resolve().parent
 
 LINK = re.compile(r"^([A-Za-z0-9_]+?)(FS|SS|FF|SF)?([+-]\d+)?$")
 WATCH_DAYS = 10        # margin below this many days = "watch"
@@ -126,8 +129,8 @@ def cpm(df):
 
 
 def main():
-    sched_file = sys.argv[1] if len(sys.argv) > 1 else "sample_infra_schedule.csv"
-    need_file = sys.argv[2] if len(sys.argv) > 2 else "need_dates.csv"
+    sched_file = sys.argv[1] if len(sys.argv) > 1 else HERE / "sample_infra_schedule.csv"
+    need_file = sys.argv[2] if len(sys.argv) > 2 else HERE / "need_dates.csv"
     start = date.fromisoformat(sys.argv[3]) if len(sys.argv) > 3 else date(2026, 1, 5)
 
     df = pd.read_csv(sched_file, dtype=str).fillna("")
@@ -146,7 +149,7 @@ def main():
     out["baseline_finish"] = base
     out["slip_days"] = [(f - b).days if pd.notna(b) else None
                         for f, b in zip(out.early_finish, base)]
-    out.to_csv("out_activities.csv", index=False)
+    out.to_csv(HERE / "out_activities.csv", index=False)
 
     # Utility readiness versus Fab Engineering need dates.
     need = pd.read_csv(need_file)
@@ -162,7 +165,7 @@ def main():
                      "margin_days": margin, "status": status,
                      "needed_by": r.needed_by})
     align = pd.DataFrame(rows).sort_values("margin_days")
-    align.to_csv("out_need_date_alignment.csv", index=False)
+    align.to_csv(HERE / "out_need_date_alignment.csv", index=False)
 
     # DCMA-style quality checks (simplified subset of the 14-point assessment).
     n_links = sum(len(acts[a]["links"]) for a in acts)
@@ -185,7 +188,7 @@ def main():
         ("Negative float activities", sum(1 for a in acts if acts[a]["tf"] < 0), "0"),
     ], columns=["check", "value", "target"])
     checks["value"] = [f"{v:g}" for v in checks["value"]]
-    checks.to_csv("out_quality_checks.csv", index=False)
+    checks.to_csv(HERE / "out_quality_checks.csv", index=False)
 
     # Text health report for leadership.
     crit = out[out.critical].sort_values("early_start")
@@ -207,7 +210,7 @@ def main():
     lines += ["", "Schedule quality checks:"]
     lines += [f"  {r.check}: {r.value} (target {r.target})" for r in checks.itertuples()]
     report = "\n".join(lines)
-    with open("out_health_report.txt", "w", encoding="utf-8") as f:
+    with open(HERE / "out_health_report.txt", "w", encoding="utf-8") as f:
         f.write(report + "\n")
     print(report)
 

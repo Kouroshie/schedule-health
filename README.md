@@ -23,6 +23,7 @@ short text health report for leadership.
 ```
 pip install -r requirements.txt
 python schedule_health.py sample_infra_schedule.csv need_dates.csv 2026-01-05
+python visualize.py
 ```
 
 ## Inputs
@@ -43,6 +44,11 @@ Link syntax in `predecessors` (separated by `;`): `A130` (finish-to-start), `A11
 | `out_need_date_alignment.csv` | forecast ready date vs. need date, margin, status |
 | `out_quality_checks.csv` | quality checks with targets |
 | `out_health_report.txt` | short text report |
+| `chart_gantt.png` | Gantt chart: critical path in red, total float, baseline finish, need dates |
+| `chart_utility_readiness.png` | margin of each utility against its need date (red, amber, green) |
+| `chart_baseline_slip.png` | forecast finish minus baseline finish per activity |
+
+`visualize.py` only reads the CSV outputs, so the same files can feed Power BI and the charts.
 
 ## Sample result
 
@@ -59,6 +65,10 @@ Utility readiness vs need dates (worst first):
   [WATCH   ] A510 Electrical available to fab (milestone): ready 2026-02-19, needed 2026-02-28, margin +9 d
   [OK      ] A420 Exhaust available to fab (milestone): ready 2026-03-06, needed 2026-03-20, margin +14 d
 ```
+
+![Gantt chart](chart_gantt.png)
+
+![Utility readiness](chart_utility_readiness.png)
 
 ## Limits
 
