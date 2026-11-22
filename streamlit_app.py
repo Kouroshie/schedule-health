@@ -149,7 +149,7 @@ pact, pnd = vz.prepare(act, nd)
 
 # ---- Headline numbers ----
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Forecast finish", f"{res['finish']:%m/%d/%Y}",
+c1.metric("Forecast finish", f"{res['finish']:%m/%d/%y}",
           delta=f"{(res['finish'] - base['finish']).days:+d} d vs as loaded" if edited else None,
           delta_color="inverse", help=f"{res['duration_days']} days from project start")
 if len(nd):
