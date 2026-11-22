@@ -1,0 +1,12 @@
+id,name,area,duration,predecessors,baseline_finish
+M100,Project start (milestone),Milestone,0,,2026-03-02
+D110,Design development,Design,20,M100,2026-03-22
+D120,Permit application and review,Permits,30,D110,2026-04-21
+D130,Procure long-lead equipment,Procurement,45,D110SS+10,2026-05-01
+C140,Site preparation,Construction,10,D120,2026-05-01
+C150,Main construction,Construction,40,C140,2026-06-10
+C160,Install equipment,Construction,15,C150FS+2;D130,2026-06-27
+C170,Finishes,Construction,12,C150SS+30,2026-06-25
+T180,Testing and commissioning,Commissioning,10,C160;C170FF-3,2026-07-07
+M190,Ready for use (milestone),Milestone,0,T180,2026-07-07
+M200,Project complete (milestone),Milestone,0,M190FS+5,2026-07-12

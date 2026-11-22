@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from schedule_health import normalize_needs, read_table
+
 HERE = Path(__file__).resolve().parent
 TABLES = {  # published name: output file from schedule_health.py
     "activities": "out_activities.csv",
@@ -68,7 +70,7 @@ def quality_gate(t, needs_file):
         problems.append("no critical path found")
     if (act["early_finish"] < act["early_start"]).any():
         problems.append("finish before start")
-    expected = set(pd.read_csv(needs_file)["utility_milestone"])
+    expected = set() if str(needs_file) == "-" else set(normalize_needs(read_table(needs_file, "need_dates"))["milestone"])
     missing = expected - set(nd["milestone"])
     if missing:
         problems.append("need-date milestones missing from results: " + ", ".join(sorted(missing)))
@@ -82,7 +84,7 @@ def kpis(t, data_date):
         "data_date": data_date,
         "forecast_finish": act["early_finish"].max(),
         "critical_activities": int(crit.sum()),
-        "worst_margin_days": int(nd["margin_days"].min()),
+        "worst_margin_days": int(nd["margin_days"].min()) if len(nd) else None,
         "conflicts": int((nd["status"] == "CONFLICT").sum()),
         "watch": int((nd["status"] == "WATCH").sum()),
         "max_slip_days": float(act["slip_days"].max()),
@@ -145,8 +147,9 @@ def main():
         k = t["kpis"].iloc[0]
         log.update(status="OK", activities=len(t["activities"]), forecast_finish=k.forecast_finish,
                    worst_margin_days=k.worst_margin_days, message="published")
+        margin = "n/a" if pd.isna(k.worst_margin_days) else f"{int(k.worst_margin_days):+d} d"
         print(f"OK  data date {data_date}: {len(t['activities'])} activities, finish {k.forecast_finish}, "
-              f"worst margin {k.worst_margin_days:+d} d, {k.conflicts} conflict(s). Published to {out}")
+              f"worst margin {margin}, {k.conflicts} conflict(s). Published to {out}")
     except Exception as e:  # log every failure, keep the last good data in place
         log.update(status="FAILED", message=str(e))
         print(f"FAILED  {e}. Last good data left in {out / 'current'}", file=sys.stderr)

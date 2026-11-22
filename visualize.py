@@ -6,7 +6,7 @@ Run schedule_health.py first, then:
 
 Reads out_activities.csv and out_need_date_alignment.csv from this folder and writes:
     chart_gantt.png              Gantt chart: critical path in red, total float, baseline finish, need dates
-    chart_utility_readiness.png  Margin of each utility milestone against its need date
+    chart_utility_readiness.png  Margin of each need-date milestone against its need date
     chart_baseline_slip.png      Forecast finish minus baseline finish per activity
 """
 from pathlib import Path
@@ -39,6 +39,10 @@ plt.rcParams.update({
 })
 
 
+def short(text, n=48):
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
 def dates(s):
     return pd.to_datetime(s, format="mixed")
 
@@ -59,7 +63,7 @@ def load():
     return prepare(pd.read_csv(HERE / "out_activities.csv"), pd.read_csv(HERE / "out_need_date_alignment.csv"))
 
 
-def gantt(act, need):
+def gantt(act, need, title="Schedule: critical path, float and need dates"):
     n = len(act)
     fig, ax = plt.subplots(figsize=(12, 0.34 * n + 1.8))
     y = range(n)
@@ -85,21 +89,26 @@ def gantt(act, need):
                 ax.annotate(f"{late} d late vs need date", (r.early_finish, i), xytext=(8, -3),
                             textcoords="offset points", color=INK, fontsize=8, fontweight="bold")
 
-    ax.set_yticks(list(y), [f"{r.id}  {r.name}" for r in act.itertuples()])
+    ax.set_yticks(list(y), [short(f"{r.id}  {r.name}") for r in act.itertuples()])
     ax.invert_yaxis()
-    ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO, interval=2))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    span = (act["late_finish"].max() - act["early_start"].min()).days
+    if span <= 200:  # short project: a tick every other Monday
+        ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO, interval=2))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    else:            # long project: let matplotlib pick months or quarters
+        loc = mdates.AutoDateLocator(maxticks=12)
+        ax.xaxis.set_major_locator(loc)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
     ax.grid(axis="x", color=GRID, lw=0.8, zorder=0)
     ax.tick_params(axis="y", length=0)
     finish = act["early_finish"].max()
     ax.axvline(finish, color=MUTED, lw=1, ls="--", zorder=1)
     ax.text(finish + day, -0.9, f"Forecast finish {finish:%m/%d/%Y}", color=MUTED, fontsize=8)
-    ax.set_title("Infra utility schedule: critical path, float and need dates (prototype data)",
-                 loc="left", fontsize=12, color=INK, pad=14)
+    ax.set_title(title, loc="left", fontsize=12, color=INK, pad=14)
     legend = [Patch(color=RED, label="Critical path (0 float)"), Patch(color=BLUE, label="Non-critical activity"),
               Patch(color=FLOAT, label="Total float"),
               Line2D([], [], color=INK, lw=1.4, label="Baseline finish"),
-              Line2D([], [], marker="v", ls="", mfc="white", mec=INK, label="Fab need date"),
+              Line2D([], [], marker="v", ls="", mfc="white", mec=INK, label="Need date"),
               Line2D([], [], marker="D", ls="", color=MUTED, label="Milestone")]
     ax.legend(handles=legend, loc="upper center", ncol=6, frameon=False, fontsize=8,
               bbox_to_anchor=(0.4, -0.05))
@@ -107,36 +116,38 @@ def gantt(act, need):
     return fig
 
 
-def readiness(need):
+def readiness(need, watch_days=10):
     need = need.sort_values("margin_days")
     colors = {"CONFLICT": RED, "WATCH": AMBER, "OK": GREEN}
     fig, ax = plt.subplots(figsize=(9, 0.55 * len(need) + 1.6))
-    labels = [n.replace(" (milestone)", "") for n in need["name"]]
+    labels = [short(n.replace(" (milestone)", "")) for n in need["name"]]
     ax.barh(labels, need["margin_days"], color=[colors[s] for s in need["status"]], height=0.56, zorder=3)
     for i, r in enumerate(need.itertuples()):
         txt = f"{r.margin_days:+d} d  {r.status}  (ready {r.forecast_ready:%m/%d}, needed {r.need_date:%m/%d})"
         ax.annotate(txt, (max(r.margin_days, 0), i), xytext=(6, -3), textcoords="offset points", color=INK, fontsize=8)
     ax.axvline(0, color=INK, lw=1)
-    ax.axvspan(0, 10, color=AMBER, alpha=0.08, zorder=0)
+    ax.axvspan(0, watch_days, color=AMBER, alpha=0.08, zorder=0)
     lo, hi = need["margin_days"].min(), need["margin_days"].max()
     ax.set_xlim(min(lo, 0) - 3, hi + 22)
-    ax.set_xlabel("Margin in days (need date minus forecast ready).  Below 0 = conflict, 0 to 9 = watch")
+    ax.set_xlabel(f"Margin in days (need date minus forecast ready).  Below 0 = conflict, "
+                  f"0 to {watch_days - 1} = watch")
     ax.grid(axis="x", color=GRID, lw=0.8, zorder=0)
     ax.tick_params(axis="y", length=0)
-    ax.set_title("Utility readiness vs Fab Engineering need dates", loc="left", fontsize=12, color=INK, pad=10)
+    ax.set_title("Milestone readiness vs need dates", loc="left", fontsize=12, color=INK, pad=10)
     fig.tight_layout()
     return fig
 
 
-def slip(act):
-    s = act[act["slip_days"].fillna(0) != 0].sort_values("slip_days", ascending=False)
+def slip(act, top=30):
+    s = act[act["slip_days"].fillna(0) != 0]
+    s = s.loc[s["slip_days"].abs().sort_values(ascending=False).index[:top]].sort_values("slip_days", ascending=False)
     fig, ax = plt.subplots(figsize=(9, 0.42 * max(len(s), 1) + 1.6))
     if s.empty:
         ax.text(0.5, 0.5, "No activity is forecast off its baseline", ha="center", transform=ax.transAxes)
         ax.axis("off")
     else:
         colors = [RED if c else BLUE for c in s["critical"]]
-        ax.barh([f"{r.id}  {r.name}" for r in s.itertuples()], s["slip_days"], color=colors, height=0.56, zorder=3)
+        ax.barh([short(f"{r.id}  {r.name}") for r in s.itertuples()], s["slip_days"], color=colors, height=0.56, zorder=3)
         for i, v in enumerate(s["slip_days"]):
             ax.annotate(f"{v:+.0f} d", (v, i), xytext=(5 if v > 0 else -5, -3), textcoords="offset points",
                         ha="left" if v > 0 else "right", color=INK, fontsize=8)

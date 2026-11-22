@@ -1,19 +1,23 @@
 # schedule-health
 
-A small Python tool that turns a construction schedule export into an early-warning report.
+**Try it in your browser: https://schedule-health-demo.streamlit.app** (no install needed)
 
-It reads activities, durations and logic links, runs the Critical Path Method, and checks
-whether each utility will be ready by the date the equipment team needs it. The results
-are written as CSV files that a Power BI or Tableau dashboard can refresh from, plus a
-short text health report for leadership.
+A Python tool that turns any project schedule into an early-warning report. It works for
+construction, infrastructure, engineering, IT or any other project that has activities,
+durations and logic links.
+
+It runs the Critical Path Method, checks whether key milestones will be ready by the date
+the next team needs them, measures slip against the baseline and runs DCMA-style quality
+checks. Use it as a web app, from the command line, or as a daily pipeline that feeds a
+Power BI or Tableau dashboard.
 
 ## What it does
 
 1. **Critical Path Method**: forward pass, backward pass, total float, free float and the
    critical path. Supports finish-to-start, start-to-start, finish-to-finish and
    start-to-finish links with lags or leads.
-2. **Need-date alignment**: compares each "utility available" milestone with the date it is
-   needed and labels the margin `CONFLICT` (late), `WATCH` (under 10 days) or `OK`.
+2. **Need-date alignment** (optional): compares each key milestone with the date another team
+   needs it and labels the margin `CONFLICT` (late), `WATCH` (under 10 days, adjustable) or `OK`.
 3. **Baseline slip**: forecast finish vs. baseline finish for every activity.
 4. **Schedule quality checks**: a simplified subset of the DCMA 14-point assessment
    (missing logic, leads, lags, relationship types, high float, high duration, negative float).
@@ -26,14 +30,30 @@ python schedule_health.py sample_infra_schedule.csv need_dates.csv 2026-01-05
 python visualize.py
 ```
 
+## Use it with your own project
+
+1. Download a template from [`templates/`](templates) or from the app's sidebar:
+   - `schedule_template.xlsx`: one Excel workbook with `instructions`, `schedule` and
+     `need_dates` sheets (easiest)
+   - `schedule_template.csv` and `need_dates_template.csv`: the same as two CSV files
+2. Replace the example rows with your activities. Keep the column headers.
+3. Upload the file at https://schedule-health-demo.streamlit.app and set the project name and
+   start date. Files you upload are used only in your session and are not stored.
+
+From Primavera P6 or MS Project, export activity ID, name, original duration, predecessors
+(with relationship type and lag) and baseline finish to Excel, then rename the columns to
+match the template.
+
 ## Interactive web app (Streamlit)
+
+Live at https://schedule-health-demo.streamlit.app, or run it locally:
 
 ```
 streamlit run streamlit_app.py
 ```
 
-Opens in the browser at http://localhost:8501. Load the sample schedule or upload your own
-CSV exports, then edit any duration or link in the table to test a what-if: the forecast
+Opens in the browser at http://localhost:8501. Load a sample or upload your own Excel or
+CSV files, then edit any duration or link in the table to test a what-if: the forecast
 finish, need-date margins, critical path, charts and quality checks recalculate at once and
 show the change against the schedule as loaded. The report and every table can be
 downloaded. The app, the command line tool and the Power BI pipeline all use the same engine
@@ -71,10 +91,15 @@ on-premises data gateway) and set the dataset's scheduled refresh to run after t
 
 ## Inputs
 
-| File | Columns |
-|---|---|
-| `sample_infra_schedule.csv` | `id, name, area, duration, predecessors, baseline_finish` |
-| `need_dates.csv` | `utility_milestone, need_date, needed_by` |
+| File or sheet | Required columns | Optional columns |
+|---|---|---|
+| schedule | `id`, `duration` (calendar days, 0 = milestone) | `name`, `area`, `predecessors`, `baseline_finish` |
+| need_dates (optional) | `milestone`, `need_date` | `needed_by` |
+
+Files can be `.csv` or `.xlsx`. Headers are not case sensitive, and the older column name
+`utility_milestone` is still accepted. Command line: `python schedule_health.py my_schedule.xlsx
+my_schedule.xlsx 2026-03-02` reads both sheets from one workbook; use `-` in place of the need
+dates file if the project has none.
 
 Link syntax in `predecessors` (separated by `;`): `A130` (finish-to-start), `A110SS+15`
 (start-to-start, 15-day lag), `A420FS+2`, `A500FF-3` (3-day lead).
@@ -88,7 +113,7 @@ Link syntax in `predecessors` (separated by `;`): `A130` (finish-to-start), `A11
 | `out_quality_checks.csv` | quality checks with targets |
 | `out_health_report.txt` | short text report |
 | `chart_gantt.png` | Gantt chart: critical path in red, total float, baseline finish, need dates |
-| `chart_utility_readiness.png` | margin of each utility against its need date (red, amber, green) |
+| `chart_utility_readiness.png` | margin of each need-date milestone against its need date (red, amber, green) |
 | `chart_baseline_slip.png` | forecast finish minus baseline finish per activity |
 
 `visualize.py` only reads the CSV outputs, so the same files can feed Power BI and the charts.
@@ -101,7 +126,7 @@ water, bulk gas, exhaust, electrical) feeding one equipment hook-up.
 ```
 Critical path: A100 > A200 > A210 > A220 > A230 > A610 > A620 > A630
 
-Utility readiness vs need dates (worst first):
+Milestone readiness vs need dates (worst first):
   [CONFLICT] A230 UPW available to fab (milestone): ready 2026-04-01, needed 2026-03-25, margin -7 d
   [WATCH   ] A330 Bulk gas available to fab (milestone): ready 2026-03-03, needed 2026-03-05, margin +2 d
   [WATCH   ] A140 PCW available to fab (milestone): ready 2026-02-24, needed 2026-03-01, margin +5 d
