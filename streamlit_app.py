@@ -11,6 +11,7 @@ duration or link in the table to test a what-if; every result recalculates at on
 compared with the schedule as loaded. The same engine (schedule_health.analyze) feeds the
 command line tool, the Power BI pipeline and this app.
 """
+import base64
 import io
 from datetime import date
 from pathlib import Path
@@ -25,6 +26,7 @@ from schedule_health import WATCH_DAYS, analyze, read_table
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "templates"
 MAX_GANTT_ROWS = 150
+MAX_NETWORK_NODES = 120
 
 SAMPLE_FAB = "Sample: semiconductor utility schedule"
 SAMPLE_BUILD = "Sample: building project (the template)"
@@ -110,8 +112,13 @@ def run(schedule, needs, start, watch, title):
         return None, str(e)
 
 
-def show(fig):
+def show(fig, download=None):
     st.pyplot(fig, width="stretch")
+    if download:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+        st.download_button("Download chart (.png)", buf.getvalue(), download, mime="image/png",
+                           key=f"dl-{download}")
     plt.close(fig)
 
 
@@ -121,6 +128,7 @@ def results_workbook(res):
         res["activities"].to_excel(xw, sheet_name="activities", index=False)
         res["need_dates"].to_excel(xw, sheet_name="need_dates", index=False)
         res["quality_checks"].to_excel(xw, sheet_name="quality_checks", index=False)
+        res["links"].to_excel(xw, sheet_name="links", index=False)
         pd.DataFrame({"report": res["report"].splitlines()}).to_excel(xw, sheet_name="report", index=False)
     return buf.getvalue()
 
@@ -257,8 +265,9 @@ if len(nd):
 st.markdown(summary)
 
 # ---- Detail tabs ----
-t_gantt, t_ready, t_slip, t_qc, t_report = st.tabs(
-    ["Gantt chart", "Need-date readiness", "Baseline slip", "Quality checks", "Report and downloads"])
+t_gantt, t_net, t_wbs, t_ready, t_slip, t_qc, t_report = st.tabs(
+    ["Gantt chart", "Network diagram", "WBS", "Need-date readiness", "Baseline slip", "Quality checks",
+     "Report and downloads"])
 
 with t_gantt:
     page_help(
@@ -294,8 +303,93 @@ with t_gantt:
             st.warning(f"Showing the first {MAX_GANTT_ROWS} of {len(view)} activities by start date. "
                        "Use the filters to narrow the chart.")
             view = view.sort_values("early_start").head(MAX_GANTT_ROWS)
-        show(vz.gantt(view, pnd, title=f"{project}: critical path, float and need dates"))
+        show(vz.gantt(view, pnd, title=f"{project}: critical path, float and need dates"), "gantt.png")
     st.dataframe(act, width="stretch", hide_index=True, column_config=col_cfg(act))
+
+with t_net:
+    page_help(
+        "A network (precedence) diagram shows the logic: which activity must happen before which.\n\n"
+        "- Each **box** is an activity: id, name, then duration and total float (TF). "
+        "Rounded boxes with a diamond are milestones.\n"
+        "- **Arrows** are logic links, from predecessor to successor. Read the diagram left to "
+        "right: each activity sits one column after its latest predecessor.\n"
+        "- **Red boxes and the red arrows along the center row** are the critical path: the "
+        "chain of driving links with zero float. Shorten something here and the finish moves.\n"
+        "- Labels such as **SS+15** or **FS+2** mark links that are not a plain finish-to-start "
+        "(SS = start-to-start, FF = finish-to-finish, +15 = 15-day lag, -3 = 3-day lead).\n"
+        "- The Gantt chart shows *when*; this diagram shows *why*. Use it to check that every "
+        "activity is tied in and to explain the critical path in a meeting.")
+    n1, n2 = st.columns([2, 1])
+    net_areas = sorted(a for a in pact["area"].unique() if a)
+    net_pick = n1.multiselect("Areas", net_areas, placeholder="All areas", key="net-areas",
+                              help="Show only the activities in these areas, plus the links between them.") \
+        if net_areas else []
+    net_near = n2.number_input("Show only activities with float up to (days, blank = all)", min_value=0,
+                               value=0 if len(pact) > MAX_NETWORK_NODES else None, placeholder="all",
+                               key="net-float",
+                               help="0 shows the critical path only. Large schedules start filtered to "
+                                    "keep the diagram readable.")
+    nview = pact
+    if net_pick:
+        nview = nview[nview["area"].isin(net_pick)]
+    if net_near is not None:
+        nview = nview[nview["total_float"] <= net_near]
+    if nview.empty:
+        st.info("No activities match these filters.")
+    else:
+        if len(nview) > MAX_NETWORK_NODES:
+            st.warning(f"Showing the first {MAX_NETWORK_NODES} of {len(nview)} activities by start date. "
+                       "Use the filters to narrow the diagram.")
+            nview = nview.sort_values("early_start").head(MAX_NETWORK_NODES)
+        nfig = vz.network(nview, res["links"], title=f"{project}: network diagram")
+        if nfig.get_size_inches()[0] > 18:  # long logic chain: keep it readable, scroll sideways
+            buf = io.BytesIO()
+            nfig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+            st.caption("Long diagram: scroll sideways inside the frame, or download the full-size image.")
+            st.html('<div style="overflow-x:auto;border:1px solid rgba(128,128,128,.3);border-radius:6px">'
+                    f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}" '
+                    'style="max-width:none;height:auto"></div>')
+            st.download_button("Download chart (.png)", buf.getvalue(), "network_diagram.png", mime="image/png",
+                               key="dl-network-wide")
+            plt.close(nfig)
+        else:
+            show(nfig, "network_diagram.png")
+    with st.expander("Logic links table"):
+        st.dataframe(res["links"], width="stretch", hide_index=True, column_config={
+            "predecessor": st.column_config.Column(help="Activity that comes first."),
+            "successor": st.column_config.Column(help="Activity that depends on it."),
+            "type": st.column_config.Column(help="FS finish-to-start, SS start-to-start, FF finish-to-finish, "
+                                                 "SF start-to-finish."),
+            "lag": st.column_config.Column(help="Days of wait (positive) or overlap (negative) on the link."),
+            "driving": st.column_config.Column(help="True when this link sets the successor's early date."),
+            "critical": st.column_config.Column(help="True when the link is driving and both activities "
+                                                     "are critical: it is part of the critical path.")})
+
+with t_wbs:
+    page_help(
+        "A work breakdown structure (WBS) splits the project into parts you can plan, assign and "
+        "report on.\n\n"
+        "- **Level 1** is the whole project: number of activities, start, finish and duration.\n"
+        "- **Level 2** is one branch per `area` in your schedule (discipline, system, contractor "
+        "or phase), numbered 1.1, 1.2 and so on, ordered by start date. It shows how many "
+        "activities and how many critical ones each area has, and its date span.\n"
+        "- **Level 3** lists the activities in each area with duration and total float.\n"
+        "- **Red** marks critical work, so you can see at a glance which areas drive the finish.\n\n"
+        "Fill in the `area` column to get a useful WBS; activities without one go under "
+        "Unassigned.")
+    wcount = pact.assign(area=pact["area"].fillna("").replace("", "Unassigned")).groupby("area").agg(
+        activities=("id", "count"), critical=("critical", "sum"), start=("early_start", "min"),
+        finish=("early_finish", "max")).reset_index().sort_values("start")
+    if len(wcount) > 14:
+        st.warning(f"{len(wcount)} areas: the chart gets wide. The table below has every area.")
+    show(vz.wbs(pact, project=project or "Project"), "wbs.png")
+    wcount["start"], wcount["finish"] = wcount["start"].dt.date, wcount["finish"].dt.date
+    st.dataframe(wcount, width="stretch", hide_index=True, column_config={
+        "area": st.column_config.Column(help="WBS level 2 branch (the area column)."),
+        "activities": st.column_config.Column(help="Number of activities in the area."),
+        "critical": st.column_config.Column(help="Activities in the area with zero float."),
+        "start": st.column_config.Column(help="Earliest start in the area."),
+        "finish": st.column_config.Column(help="Latest finish in the area.")})
 
 with t_ready:
     page_help(
@@ -309,7 +403,7 @@ with t_ready:
         "Worst margin is listed first. To clear a conflict, shorten or re-sequence the critical "
         "activities in front of that milestone, or agree a later need date.")
     if len(nd):
-        show(vz.readiness(pnd, watch_days=int(watch)))
+        show(vz.readiness(pnd, watch_days=int(watch)), "need_date_readiness.png")
         st.dataframe(nd, width="stretch", hide_index=True, column_config=col_cfg(nd))
     else:
         st.info("No need dates given. Add a need_dates sheet or file (milestone, need_date, needed_by) "
@@ -324,7 +418,7 @@ with t_slip:
         "bars have float, so their slip uses up that float first.\n\n"
         "Needs a `baseline_finish` column in your schedule.")
     if act["slip_days"].notna().any():
-        show(vz.slip(pact))
+        show(vz.slip(pact), "baseline_slip.png")
     else:
         st.info("No baseline_finish dates given, so slip cannot be measured.")
 

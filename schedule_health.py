@@ -261,6 +261,19 @@ def analyze(df, need, start, watch_days=WATCH_DAYS, title="SCHEDULE HEALTH REPOR
     ], columns=["check", "value", "target"])
     checks["value"] = [f"{v:g}" for v in checks["value"]]
 
+    # Logic links, for the network diagram. A link is driving when it sets the successor's
+    # early dates (no gap); a driving link between two critical activities is on the critical path.
+    def gap(p, kind, lag, s):
+        P, S = acts[p], acts[s]
+        return {"FS": S["es"] - P["ef"], "SS": S["es"] - P["es"],
+                "FF": S["ef"] - P["ef"], "SF": S["ef"] - P["es"]}[kind] - lag
+    links = pd.DataFrame([
+        {"predecessor": p, "successor": s, "type": kind, "lag": lag,
+         "driving": gap(p, kind, lag, s) == 0,
+         "critical": gap(p, kind, lag, s) == 0 and acts[p]["tf"] <= 0 and acts[s]["tf"] <= 0}
+        for s in df.id for p, kind, lag in acts[s]["links"]],
+        columns=["predecessor", "successor", "type", "lag", "driving", "critical"])
+
     # Text health report for leadership.
     crit = out[out.critical].sort_values("early_start")
     lines = [
@@ -283,7 +296,7 @@ def analyze(df, need, start, watch_days=WATCH_DAYS, title="SCHEDULE HEALTH REPOR
     lines += ["", "Schedule quality checks:"]
     lines += [f"  {r.check}: {r.value} (target {r.target})" for r in checks.itertuples()]
     report = "\n".join(lines)
-    return {"activities": out, "need_dates": align, "quality_checks": checks,
+    return {"activities": out, "need_dates": align, "quality_checks": checks, "links": links,
             "report": report, "finish": day(end), "duration_days": end}
 
 
@@ -298,6 +311,7 @@ def main():
     r["activities"].to_csv(HERE / "out_activities.csv", index=False)
     r["need_dates"].to_csv(HERE / "out_need_date_alignment.csv", index=False)
     r["quality_checks"].to_csv(HERE / "out_quality_checks.csv", index=False)
+    r["links"].to_csv(HERE / "out_links.csv", index=False)
     with open(HERE / "out_health_report.txt", "w", encoding="utf-8") as f:
         f.write(r["report"] + "\n")
     print(r["report"])
