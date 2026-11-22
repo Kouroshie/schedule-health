@@ -1,12 +1,23 @@
 id,name,area,duration,predecessors,baseline_finish
 M100,Project start (milestone),Milestone,0,,2026-03-02
-D110,Design development,Design,20,M100,2026-03-22
-D120,Permit application and review,Permits,30,D110,2026-04-21
-D130,Procure long-lead equipment,Procurement,45,D110SS+10,2026-05-01
-C140,Site preparation,Construction,10,D120,2026-05-01
-C150,Main construction,Construction,40,C140,2026-06-10
-C160,Install equipment,Construction,15,C150FS+2;D130,2026-06-27
-C170,Finishes,Construction,12,C150SS+30,2026-06-25
-T180,Testing and commissioning,Commissioning,10,C160;C170FF-3,2026-07-07
-M190,Ready for use (milestone),Milestone,0,T180,2026-07-07
-M200,Project complete (milestone),Milestone,0,M190FS+5,2026-07-12
+D110,Schematic design,Design,15,M100,2026-03-17
+D120,Design development,Design,20,D110,2026-04-06
+D130,Construction documents,Design,20,D120,2026-04-26
+P140,Permit application and review,Permits,30,D130,2026-05-16
+P150,Bid and award contractor,Procurement,20,D130,2026-05-16
+P155,Equipment submittals and approval,Procurement,20,P150,2026-06-05
+P160,Procure long-lead equipment,Procurement,40,P155,2026-07-15
+C170,Mobilize and site preparation,Construction,10,P140;P150,2026-05-26
+C180,Foundations,Construction,20,C170,2026-06-15
+C190,Structure,Construction,30,C180,2026-07-15
+C200,Roof and building envelope,Construction,25,C190,2026-08-09
+C210,MEP rough-in,Construction,25,C190,2026-08-09
+C220,Install major equipment,Construction,15,C210;P160,2026-08-24
+C230,Interior finishes,Construction,20,C200;C210,2026-08-29
+C240,MEP finish and trim,Construction,10,C220;C230FF,2026-09-03
+C250,Site work and paving,Construction,15,C200SS+10,2026-08-09
+T260,Testing and commissioning,Commissioning,15,C240,2026-09-18
+T270,Punch list and final inspections,Commissioning,10,T260;C250,2026-09-28
+M280,Ready for use (milestone),Milestone,0,T270,2026-09-28
+T290,Closeout documents and handover,Commissioning,5,M280,2026-10-03
+M300,Project complete (milestone),Milestone,0,T290,2026-10-03
