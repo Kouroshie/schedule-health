@@ -12,6 +12,7 @@ compared with the schedule as loaded. The same engine (schedule_health.analyze) 
 command line tool, the Power BI pipeline and this app.
 """
 import base64
+import importlib
 import io
 from datetime import date
 from pathlib import Path
@@ -20,8 +21,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+import schedule_health
 import visualize as vz
-from schedule_health import WATCH_DAYS, analyze, read_table
+
+# A hosted app keeps imported modules in memory between reruns; reload them so a code push
+# always takes effect without restarting the server.
+importlib.reload(schedule_health)
+importlib.reload(vz)
+from schedule_health import WATCH_DAYS, analyze, read_table  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TEMPLATES = HERE / "templates"
