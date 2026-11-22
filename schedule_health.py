@@ -128,12 +128,11 @@ def cpm(df):
     return acts, succs, end
 
 
-def main():
-    sched_file = sys.argv[1] if len(sys.argv) > 1 else HERE / "sample_infra_schedule.csv"
-    need_file = sys.argv[2] if len(sys.argv) > 2 else HERE / "need_dates.csv"
-    start = date.fromisoformat(sys.argv[3]) if len(sys.argv) > 3 else date(2026, 1, 5)
-
-    df = pd.read_csv(sched_file, dtype=str).fillna("")
+def analyze(df, need, start):
+    """Run every check in memory. df and need are tables of strings (as read from the CSVs).
+    Returns a dict of DataFrames plus the text report; nothing is written to disk.
+    Used by main() below and by the Streamlit app."""
+    df = df.astype(str).replace({"nan": "", "None": ""})
     acts, succs, end = cpm(df)
     day = lambda n: start + timedelta(days=n)
 
@@ -149,14 +148,14 @@ def main():
     out["baseline_finish"] = base
     out["slip_days"] = [(f - b).days if pd.notna(b) else None
                         for f, b in zip(out.early_finish, base)]
-    out.to_csv(HERE / "out_activities.csv", index=False)
 
     # Utility readiness versus Fab Engineering need dates.
-    need = pd.read_csv(need_file)
     rows = []
     for r in need.itertuples():
+        if r.utility_milestone not in acts:
+            raise ValueError(f"Need-date milestone {r.utility_milestone} is not in the schedule")
         fc = day(acts[r.utility_milestone]["ef"])
-        nd = date.fromisoformat(r.need_date)
+        nd = pd.Timestamp(r.need_date).date()
         margin = (nd - fc).days
         status = "CONFLICT" if margin < 0 else "WATCH" if margin < WATCH_DAYS else "OK"
         name = df.loc[df.id == r.utility_milestone, "name"].iloc[0]
@@ -165,7 +164,6 @@ def main():
                      "margin_days": margin, "status": status,
                      "needed_by": r.needed_by})
     align = pd.DataFrame(rows).sort_values("margin_days")
-    align.to_csv(HERE / "out_need_date_alignment.csv", index=False)
 
     # DCMA-style quality checks (simplified subset of the 14-point assessment).
     n_links = sum(len(acts[a]["links"]) for a in acts)
@@ -188,7 +186,6 @@ def main():
         ("Negative float activities", sum(1 for a in acts if acts[a]["tf"] < 0), "0"),
     ], columns=["check", "value", "target"])
     checks["value"] = [f"{v:g}" for v in checks["value"]]
-    checks.to_csv(HERE / "out_quality_checks.csv", index=False)
 
     # Text health report for leadership.
     crit = out[out.critical].sort_values("early_start")
@@ -210,9 +207,24 @@ def main():
     lines += ["", "Schedule quality checks:"]
     lines += [f"  {r.check}: {r.value} (target {r.target})" for r in checks.itertuples()]
     report = "\n".join(lines)
+    return {"activities": out, "need_dates": align, "quality_checks": checks,
+            "report": report, "finish": day(end), "duration_days": end}
+
+
+def main():
+    sched_file = sys.argv[1] if len(sys.argv) > 1 else HERE / "sample_infra_schedule.csv"
+    need_file = sys.argv[2] if len(sys.argv) > 2 else HERE / "need_dates.csv"
+    start = date.fromisoformat(sys.argv[3]) if len(sys.argv) > 3 else date(2026, 1, 5)
+
+    df = pd.read_csv(sched_file, dtype=str).fillna("")
+    need = pd.read_csv(need_file, dtype=str).fillna("")
+    r = analyze(df, need, start)
+    r["activities"].to_csv(HERE / "out_activities.csv", index=False)
+    r["need_dates"].to_csv(HERE / "out_need_date_alignment.csv", index=False)
+    r["quality_checks"].to_csv(HERE / "out_quality_checks.csv", index=False)
     with open(HERE / "out_health_report.txt", "w", encoding="utf-8") as f:
-        f.write(report + "\n")
-    print(report)
+        f.write(r["report"] + "\n")
+    print(r["report"])
 
 
 if __name__ == "__main__":

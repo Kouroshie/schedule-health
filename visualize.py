@@ -43,15 +43,20 @@ def dates(s):
     return pd.to_datetime(s, format="mixed")
 
 
-def load():
-    act = pd.read_csv(HERE / "out_activities.csv")
+def prepare(act, need):
+    """Give the activity and need-date tables real date and boolean types for plotting."""
+    act, need = act.copy(), need.copy()
     for c in ("early_start", "early_finish", "late_finish", "baseline_finish"):
         act[c] = dates(act[c])
     act["critical"] = act["critical"].astype(str).str.upper().eq("TRUE")
-    need = pd.read_csv(HERE / "out_need_date_alignment.csv")
+    act["slip_days"] = pd.to_numeric(act["slip_days"], errors="coerce")
     for c in ("forecast_ready", "need_date"):
         need[c] = dates(need[c])
     return act, need
+
+
+def load():
+    return prepare(pd.read_csv(HERE / "out_activities.csv"), pd.read_csv(HERE / "out_need_date_alignment.csv"))
 
 
 def gantt(act, need):
@@ -99,8 +104,7 @@ def gantt(act, need):
     ax.legend(handles=legend, loc="upper center", ncol=6, frameon=False, fontsize=8,
               bbox_to_anchor=(0.4, -0.05))
     fig.tight_layout()
-    fig.savefig(HERE / "chart_gantt.png", dpi=160, bbox_inches="tight")
-    plt.close(fig)
+    return fig
 
 
 def readiness(need):
@@ -121,8 +125,7 @@ def readiness(need):
     ax.tick_params(axis="y", length=0)
     ax.set_title("Utility readiness vs Fab Engineering need dates", loc="left", fontsize=12, color=INK, pad=10)
     fig.tight_layout()
-    fig.savefig(HERE / "chart_utility_readiness.png", dpi=160)
-    plt.close(fig)
+    return fig
 
 
 def slip(act):
@@ -148,15 +151,15 @@ def slip(act):
         ax.legend(handles=kinds, frameon=False, fontsize=8, loc="upper left", bbox_to_anchor=(1.0, 1.0))
     ax.set_title("Slip vs baseline", loc="left", fontsize=12, color=INK, pad=10)
     fig.tight_layout()
-    fig.savefig(HERE / "chart_baseline_slip.png", dpi=160, bbox_inches="tight")
-    plt.close(fig)
+    return fig
 
 
 def main():
     act, need = load()
-    gantt(act, need)
-    readiness(need)
-    slip(act)
+    for fig, name in ((gantt(act, need), "chart_gantt.png"), (readiness(need), "chart_utility_readiness.png"),
+                      (slip(act), "chart_baseline_slip.png")):
+        fig.savefig(HERE / name, dpi=160, bbox_inches="tight")
+        plt.close(fig)
     print("wrote chart_gantt.png, chart_utility_readiness.png, chart_baseline_slip.png")
 
 

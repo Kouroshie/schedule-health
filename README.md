@@ -26,6 +26,49 @@ python schedule_health.py sample_infra_schedule.csv need_dates.csv 2026-01-05
 python visualize.py
 ```
 
+## Interactive web app (Streamlit)
+
+```
+streamlit run streamlit_app.py
+```
+
+Opens in the browser at http://localhost:8501. Load the sample schedule or upload your own
+CSV exports, then edit any duration or link in the table to test a what-if: the forecast
+finish, need-date margins, critical path, charts and quality checks recalculate at once and
+show the change against the schedule as loaded. The report and every table can be
+downloaded. The app, the command line tool and the Power BI pipeline all use the same engine
+(`schedule_health.analyze`).
+
+## Automated reporting pipeline into Power BI
+
+`pipeline.py` turns the tool into a daily, unattended feed for a Power BI report:
+
+```
+python pipeline.py --data-date 2026-02-02 --charts
+```
+
+Each run:
+
+1. runs the CPM and checks on the latest schedule export;
+2. passes a **quality gate** (unique IDs, calculated dates present, a critical path exists,
+   every need-date milestone found). If anything fails, nothing is published and the
+   report keeps the last good data, so leadership never sees wrong numbers;
+3. publishes stable tables to `powerbi/current/` (activities, need dates, quality checks,
+   KPIs), written atomically so Power BI never reads a half-written file;
+4. adds a dated snapshot to `powerbi/history/` (a rerun on the same data date replaces it),
+   so the report can trend forecast finish, float erosion and need-date margins;
+5. logs the run (time, status, finish, worst margin, error message) to `powerbi/refresh_log.csv`.
+
+Connect Power BI with the queries in `powerbi/queries.pq` (Power Query M, typed columns,
+plus suggested DAX measures). Schedule the run daily with Windows Task Scheduler:
+
+```
+schtasks /Create /TN "Schedule health pipeline" /TR "C:\path\to\schedule-health\run_pipeline.bat" /SC DAILY /ST 06:00
+```
+
+In the Power BI service, keep the `powerbi` folder in OneDrive or SharePoint (or use an
+on-premises data gateway) and set the dataset's scheduled refresh to run after the pipeline.
+
 ## Inputs
 
 | File | Columns |
@@ -77,8 +120,7 @@ Utility readiness vs need dates (worst first):
 - No resources or date constraints yet.
 - Sample data is invented for illustration.
 
-Planned next steps: read Primavera P6 XER exports directly, add work calendars, and track
-float erosion between updates.
+Planned next steps: read Primavera P6 XER exports directly and add work calendars.
 
 ## License
 
