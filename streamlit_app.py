@@ -349,7 +349,7 @@ with t_net:
                        "Use the filters to narrow the diagram.")
             nview = nview.sort_values("early_start").head(MAX_NETWORK_NODES)
         nfig = vz.network(nview, res["links"], title=f"{project}: network diagram")
-        if nfig.get_size_inches()[0] > 18:  # long logic chain: keep it readable, scroll sideways
+        if nfig.get_size_inches()[0] > 26:  # long logic chain: keep it readable, scroll sideways
             buf = io.BytesIO()
             nfig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
             st.caption("Long diagram: scroll sideways inside the frame, or download the full-size image.")
