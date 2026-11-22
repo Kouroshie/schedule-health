@@ -165,7 +165,7 @@ else:
 c4.metric("Critical activities", int(act.critical.sum()), help=f"of {len(act)} activities")
 summary = f"**Critical path:** {' > '.join(act[act.critical].sort_values('early_start').id)}"
 if len(nd):
-    summary = (f"**Worst:** {worst.milestone} {worst.name}, ready {worst.forecast_ready:%m/%d/%Y}, "
+    summary = (f"**Worst:** {worst.milestone} {worst['name']}, ready {worst.forecast_ready:%m/%d/%Y}, "
                f"needed {worst.need_date:%m/%d/%Y} ({worst.status}).  " + summary)
 st.markdown(summary)
 
