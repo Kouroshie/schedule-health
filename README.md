@@ -22,8 +22,8 @@ Power BI or Tableau dashboard.
 4. **Schedule quality checks**: a simplified subset of the DCMA 14-point assessment
    (missing logic, leads, lags, relationship types, high float, high duration, negative float).
 5. **Charts**: Gantt chart, network (precedence) diagram with the critical path along the
-   center row, work breakdown structure (project > area > activities), need-date readiness
-   and baseline slip.
+   center row and right-angle links that never pass behind a box, need-date readiness and
+   baseline slip.
 
 ## Run it
 
@@ -120,7 +120,6 @@ Link syntax in `predecessors` (separated by `;`): `A130` (finish-to-start), `A11
 | `chart_utility_readiness.png` | margin of each need-date milestone against its need date (red, amber, green) |
 | `chart_baseline_slip.png` | forecast finish minus baseline finish per activity |
 | `chart_network.png` | network diagram: activity boxes (duration, total float) and logic links, critical path in red |
-| `chart_wbs.png` | work breakdown structure: project, one branch per area, activities under each |
 
 `visualize.py` only reads the CSV outputs, so the same files can feed Power BI and the charts.
 
@@ -143,8 +142,6 @@ Milestone readiness vs need dates (worst first):
 ![Gantt chart](chart_gantt.png)
 
 ![Network diagram](chart_network.png)
-
-![Work breakdown structure](chart_wbs.png)
 
 ![Utility readiness](chart_utility_readiness.png)
 

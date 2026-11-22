@@ -21,6 +21,17 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+# Started with plain "python streamlit_app.py" (e.g. the VS Code Run button)? Relaunch it
+# under "streamlit run" so the app opens in the browser instead of printing warnings.
+if __name__ == "__main__":
+    from streamlit import runtime
+
+    if not runtime.exists():
+        import subprocess
+        import sys
+
+        sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", __file__, *sys.argv[1:]]))
+
 import schedule_health
 import visualize as vz
 
@@ -272,8 +283,8 @@ if len(nd):
 st.markdown(summary)
 
 # ---- Detail tabs ----
-t_gantt, t_net, t_wbs, t_ready, t_slip, t_qc, t_report = st.tabs(
-    ["Gantt chart", "Network diagram", "WBS", "Need-date readiness", "Baseline slip", "Quality checks",
+t_gantt, t_net, t_ready, t_slip, t_qc, t_report = st.tabs(
+    ["Gantt chart", "Network diagram", "Need-date readiness", "Baseline slip", "Quality checks",
      "Report and downloads"])
 
 with t_gantt:
@@ -319,7 +330,8 @@ with t_net:
         "- Each **box** is an activity: id, name, then duration and total float (TF). "
         "Rounded boxes with a diamond are milestones.\n"
         "- **Arrows** are logic links, from predecessor to successor. Read the diagram left to "
-        "right: each activity sits one column after its latest predecessor.\n"
+        "right: each activity sits one column after its latest predecessor. Arrows run at right "
+        "angles in the gaps between boxes and never pass behind a box.\n"
         "- **Red boxes and the red arrows along the center row** are the critical path: the "
         "chain of driving links with zero float. Shorten something here and the finish moves.\n"
         "- Labels such as **SS+15** or **FS+2** mark links that are not a plain finish-to-start "
@@ -371,32 +383,6 @@ with t_net:
             "driving": st.column_config.Column(help="True when this link sets the successor's early date."),
             "critical": st.column_config.Column(help="True when the link is driving and both activities "
                                                      "are critical: it is part of the critical path.")})
-
-with t_wbs:
-    page_help(
-        "A work breakdown structure (WBS) splits the project into parts you can plan, assign and "
-        "report on.\n\n"
-        "- **Level 1** is the whole project: number of activities, start, finish and duration.\n"
-        "- **Level 2** is one branch per `area` in your schedule (discipline, system, contractor "
-        "or phase), numbered 1.1, 1.2 and so on, ordered by start date. It shows how many "
-        "activities and how many critical ones each area has, and its date span.\n"
-        "- **Level 3** lists the activities in each area with duration and total float.\n"
-        "- **Red** marks critical work, so you can see at a glance which areas drive the finish.\n\n"
-        "Fill in the `area` column to get a useful WBS; activities without one go under "
-        "Unassigned.")
-    wcount = pact.assign(area=pact["area"].fillna("").replace("", "Unassigned")).groupby("area").agg(
-        activities=("id", "count"), critical=("critical", "sum"), start=("early_start", "min"),
-        finish=("early_finish", "max")).reset_index().sort_values("start")
-    if len(wcount) > 14:
-        st.warning(f"{len(wcount)} areas: the chart gets wide. The table below has every area.")
-    show(vz.wbs(pact, project=project or "Project"), "wbs.png")
-    wcount["start"], wcount["finish"] = wcount["start"].dt.date, wcount["finish"].dt.date
-    st.dataframe(wcount, width="stretch", hide_index=True, column_config={
-        "area": st.column_config.Column(help="WBS level 2 branch (the area column)."),
-        "activities": st.column_config.Column(help="Number of activities in the area."),
-        "critical": st.column_config.Column(help="Activities in the area with zero float."),
-        "start": st.column_config.Column(help="Earliest start in the area."),
-        "finish": st.column_config.Column(help="Latest finish in the area.")})
 
 with t_ready:
     page_help(

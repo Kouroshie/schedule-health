@@ -9,7 +9,6 @@ Reads out_activities.csv and out_need_date_alignment.csv from this folder and wr
     chart_utility_readiness.png  Margin of each need-date milestone against its need date
     chart_baseline_slip.png      Forecast finish minus baseline finish per activity
     chart_network.png            Network (precedence) diagram: activity boxes and logic links
-    chart_wbs.png                Work breakdown structure: project > area > activities
 """
 import textwrap
 from collections import defaultdict
@@ -190,6 +189,118 @@ def _link_label(kind, lag):
     return f"{kind}{lag:+d}" if lag else kind
 
 
+def _tracks(segs, lo_room):
+    """Give overlapping segments in one channel separate tracks. segs: list of (lo, hi, key).
+    Returns {key: offset from the channel center}."""
+    ends, track = [], {}
+    for lo, hi, key in sorted(segs):
+        t = next((k for k, e in enumerate(ends) if e < lo - 0.02), None)
+        if t is None:
+            t, ends = len(ends), ends + [hi]
+        ends[t] = hi
+        track[key] = t
+    n = len(ends)
+    step = min(0.11, 2 * lo_room / max(n, 1))
+    return {k: (t - (n - 1) / 2) * step for k, t in track.items()}
+
+
+def _route_links(lk, col, row, pos, W, DX, DY):
+    """Right-angle routes that never pass behind a box. A link leaves the right side of its
+    predecessor, runs in the empty channels between columns and the empty lanes between rows,
+    and enters the left side of its successor. Links sharing a channel get their own track."""
+    occupied = {(col[i], row[i]) for i in pos}
+    # Row corridors: a box's own links use the channel next to it on its row. A link that runs
+    # along a row claims the cells and channels it crosses, so two links never share a stretch.
+    claim = defaultdict(set)
+    for r in lk.itertuples():
+        claim[("ch", col[r.predecessor], row[r.predecessor])].add(("out", r.predecessor))
+        claim[("ch", col[r.successor] - 1, row[r.successor])].add(("in", r.successor))
+
+    def run(rr, a, b, own, turn=None):
+        """Units on row rr from channel a to channel b (cells in between); None if blocked.
+        The channel where the link turns is left out: track order keeps its stubs apart."""
+        units = [("ch", c, rr) for c in range(a, b + 1) if c != turn] +                 [("cell", c, rr) for c in range(a + 1, b + 1)]
+        if any((u[0] == "cell" and (u[1], u[2]) in occupied) or not claim[u] <= own for u in units):
+            return None
+        return units
+
+    order = sorted(range(len(lk)), key=lambda k: (not lk.iloc[k]["critical"],
+                                                  col[lk.iloc[k]["successor"]] - col[lk.iloc[k]["predecessor"]]))
+    plans = []
+    for k in order:
+        r = next(lk.iloc[[k]].itertuples())
+        p, s = r.predecessor, r.successor
+        c1, c2, r1, r2 = col[p], col[s], row[p], row[s]
+        own = {("out", p), ("in", s)}
+        if r1 == r2 and (u := run(r1, c1, c2 - 1, own)) is not None:
+            plan = ("straight",)
+        elif c2 == c1 + 1:
+            u, plan = [], ("bend", c1)   # next column: one turn in the gap between them
+        elif (u := run(r2, c1, c2 - 1, own, turn=c1)) is not None:
+            plan = ("bend", c1)          # turn right after the predecessor, run along the successor's row
+        elif (u := run(r1, c1, c2 - 1, own, turn=c2 - 1)) is not None:
+            plan = ("bend", c2 - 1)      # run along the predecessor's row, turn just before the successor
+        else:
+            u = []
+            lane = r2 - 0.5 if r1 <= r2 else r2 + 0.5   # gap between rows, next to the successor
+            plan = ("lane", c1, lane, c2 - 1)
+        for unit in u:
+            claim[unit].add(("link", k))
+        plans.append((k, r, plan))
+
+    # Vertical pieces in each channel between columns. Each has a row where a horizontal piece
+    # leaves it to the left (from a predecessor) and a row where one leaves it to the right
+    # (toward a successor). Ordering the tracks so that every left piece on a row sits left of
+    # every right piece on that row keeps exit and entry stubs from overlapping.
+    vseg, hseg = defaultdict(dict), defaultdict(list)
+    for k, r, plan in plans:
+        r1, r2 = row[r.predecessor], row[r.successor]
+        if plan[0] == "bend":
+            vseg[plan[1]][(k, 0)] = (r1, r2, min(r1, r2))
+        elif plan[0] == "lane":
+            _, ca, lane, cb = plan
+            vseg[ca][(k, 0)] = (r1, None, min(r1, lane))
+            vseg[cb][(k, 1)] = (None, r2, min(lane, r2))
+            hseg[lane].append((ca, cb, k))
+    voff = {}
+    for c, segs in vseg.items():
+        keys = sorted(segs, key=lambda key: (segs[key][2], key))
+        before = {key: set() for key in keys}   # keys that must sit left of this one
+        for a_ in keys:
+            for b_ in keys:
+                if a_ != b_ and segs[a_][0] is not None and segs[a_][0] == segs[b_][1]:
+                    before[b_].add(a_)
+        ordered = []
+        while keys:
+            nxt = next((key for key in keys if not (before[key] - set(ordered))), keys[0])
+            ordered.append(nxt)
+            keys.remove(nxt)
+        n = len(ordered)
+        step = min(0.11, 2 * ((DX - W) / 2 - 0.08) / max(n, 1))
+        voff.update({key: (t - (n - 1) / 2) * step for t, key in enumerate(ordered)})
+    hoff = {}
+    for lane, segs in hseg.items():
+        hoff.update(_tracks([(a * DX, b * DX + 0.01, k) for a, b, k in segs], 0.16))
+
+    xc = lambda c: c * DX + DX / 2
+    out = []
+    for k, r, plan in plans:
+        (x1, y1), (x2, y2) = pos[r.predecessor], pos[r.successor]
+        start, end = (x1 + W / 2, y1), (x2 - W / 2, y2)
+        if plan[0] == "straight":
+            pts = [start, end]
+        elif plan[0] == "bend":
+            x = xc(plan[1]) + voff[(k, 0)]
+            pts = [start, (x, y1), (x, y2), end]
+        else:
+            _, ca, lane, cb = plan
+            xa, xb = xc(ca) + voff[(k, 0)], xc(cb) + voff[(k, 1)]
+            yl = -lane * DY + hoff[k]
+            pts = [start, (xa, y1), (xa, yl), (xb, yl), (xb, y2), end]
+        out.append({"points": pts, "critical": bool(r.critical), "type": r.type, "lag": int(r.lag)})
+    return out
+
+
 def network(act, links, title="Network diagram: activities and logic links"):
     """Precedence (activity-on-node) diagram. Columns follow the logic from left to right:
     each activity sits one column after its latest predecessor. Critical activities and the
@@ -234,25 +345,23 @@ def network(act, links, title="Network diagram: activities and logic links"):
         for i, r in zip(off, slots):
             row[i] = r
     info = act.set_index("id")
-    W, H, DX, DY = 1.55, 0.78, 2.15, 1.0
+    W, H, DX, DY = 1.55, 0.78, 2.35, 1.3
     ncol = max(cols) + 1
     nrow = max(row.values()) - min(row.values()) + 1
-    fig, ax = plt.subplots(figsize=(max(7, ncol * 1.75 + 1), max(3.2, nrow * 0.85 + 1.6)))
+    fig, ax = plt.subplots(figsize=(max(7, ncol * DX * 0.8 + 1), max(3.2, nrow * DY * 0.8 + 1.6)))
     pos = {i: (col[i] * DX, -row[i] * DY) for i in ids}
-
-    for r in lk.itertuples():
-        (x1, y1), (x2, y2) = pos[r.predecessor], pos[r.successor]
-        crit = bool(r.critical)
-        span = round((x2 - x1) / DX)
-        rad = 0 if abs(y2 - y1) < 1e-6 and (span == 1 or crit) else (0.08 if span == 1 else 0.18) * (1 if y2 >= y1 else -1)
-        ax.add_patch(FancyArrowPatch((x1 + W / 2, y1), (x2 - W / 2, y2), arrowstyle="-|>", mutation_scale=9,
-                                     connectionstyle=f"arc3,rad={rad}", color=RED if crit else "#9aa1ab",
-                                     lw=1.6 if crit else 0.9, zorder=2, shrinkA=0, shrinkB=1))
-        label = _link_label(r.type, int(r.lag))
-        if label:
-            ax.text((x1 + W / 2 + x2 - W / 2) / 2, (y1 + y2) / 2 + 0.09, label, ha="center", va="bottom",
-                    fontsize=6.5, color=INK, zorder=4,
-                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none"))
+    for r in _route_links(lk, col, row, pos, W, DX, DY):
+        crit, pts = r["critical"], r["points"]
+        color, lw = (RED, 1.6) if crit else ("#9aa1ab", 0.9)
+        ax.plot([p[0] for p in pts], [p[1] for p in pts], color=color, lw=lw, zorder=2.5 if crit else 2,
+                solid_joinstyle="miter", solid_capstyle="butt")
+        (xe, ye) = pts[-1]
+        ax.add_patch(FancyArrowPatch((xe - 0.05, ye), (xe, ye), arrowstyle="-|>", mutation_scale=9,
+                                     color=color, lw=lw, zorder=2.6 if crit else 2.1, shrinkA=0, shrinkB=0))
+        label = _link_label(r["type"], r["lag"])
+        if label:  # just right of the predecessor, where the link starts
+            ax.text(pts[0][0] + 0.04, pts[0][1] + 0.04, label, ha="left", va="bottom", fontsize=6.3,
+                    color=INK, zorder=4, bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none"))
 
     for i in ids:
         x, y = pos[i]
@@ -271,7 +380,7 @@ def network(act, links, title="Network diagram: activities and logic links"):
 
     ax.set_xlim(-W / 2 - 0.3, (ncol - 1) * DX + W / 2 + 0.3)
     ys = [p[1] for p in pos.values()]
-    ax.set_ylim(min(ys) - H / 2 - 0.3, max(ys) + H / 2 + 0.3)
+    ax.set_ylim(min(ys) - DY / 2 - 0.25, max(ys) + DY / 2 + 0.25)
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_title(title, loc="left", fontsize=12, color=INK, pad=12)
@@ -284,80 +393,10 @@ def network(act, links, title="Network diagram: activities and logic links"):
     return fig
 
 
-def wbs(act, project="Project", max_rows=14):
-    """Work breakdown structure: the project on top, one branch per area, and the activities
-    of each area listed under it (critical ones outlined in red)."""
-    act = act.copy()
-    act["area"] = act["area"].fillna("").astype(str).replace("", "Unassigned")
-    groups = sorted(act.groupby("area"), key=lambda g: (g[1]["early_start"].min(), g[0]))
-    n = len(groups)
-    BW, DX = 2.2, 2.45
-    shown = min(max(len(g) for _, g in groups), max_rows + 1)
-    fig, ax = plt.subplots(figsize=(max(7, n * 2.35 + 0.4), 3.0 + shown * 0.48))
-    xs = [k * DX for k in range(n)]
-    mid = (xs[0] + xs[-1]) / 2
-    start, finish = act["early_start"].min(), act["early_finish"].max()
-
-    # Level 1: the project.
-    _box(ax, mid, 0, max(BW * 1.4, 3.2), 0.85, INK, lw=1.6, fill="#f3f4f6")
-    ax.text(mid, 0.17, f"1  {textwrap.shorten(project, 44, placeholder='…')}", ha="center", va="center",
-            fontsize=9, fontweight="bold", color=INK, zorder=5)
-    ax.text(mid, -0.17, f"{len(act)} activities  |  {start:%m/%d/%y} to {finish:%m/%d/%y}  |  "
-            f"{(finish - start).days} d", ha="center", va="center", fontsize=7, color=MUTED, zorder=5)
-    # Connector bar to the areas.
-    ax.plot([mid, mid], [-0.43, -0.8], color=MUTED, lw=1, zorder=1)
-    if n > 1:
-        ax.plot([xs[0], xs[-1]], [-0.8, -0.8], color=MUTED, lw=1, zorder=1)
-
-    y_area, LH = -1.55, 0.5
-    for k, (area, g) in enumerate(groups):
-        x = xs[k]
-        g = g.sort_values(["early_start", "id"])
-        ncrit = int(g["critical"].sum())
-        ax.plot([x, x], [-0.8, y_area + 0.4], color=MUTED, lw=1, zorder=1)
-        _box(ax, x, y_area, BW, 0.8, RED if ncrit else BLUE, lw=1.5, fill="#fdf0f0" if ncrit else "#eef4fc")
-        ax.text(x, y_area + 0.2, f"1.{k + 1}  {textwrap.shorten(area, 20, placeholder='…')}", ha="center",
-                va="center", fontsize=8, fontweight="bold", color=INK, zorder=5)
-        ax.text(x, y_area - 0.04, f"{len(g)} activities, {ncrit} critical",
-                ha="center", va="center", fontsize=6.3, color=RED if ncrit else MUTED, zorder=5)
-        ax.text(x, y_area - 0.24, f"{g['early_start'].min():%m/%d/%y} to {g['early_finish'].max():%m/%d/%y}",
-                ha="center", va="center", fontsize=6.3, color=MUTED, zorder=5)
-        rows = list(g.itertuples())
-        extra = len(rows) - max_rows if len(rows) > max_rows + 1 else 0
-        rows = rows[:max_rows] if extra else rows
-        lx = x - BW / 2 + 0.12
-        y = y_area - 0.4
-        for j, r in enumerate(rows):
-            y = y_area - 0.95 - j * LH
-            crit = bool(r.critical)
-            _box(ax, x + 0.12, y, BW - 0.24, 0.4, RED if crit else "#b8bec7", lw=1.3 if crit else 0.8)
-            ax.plot([lx, lx + 0.06], [y, y], color=MUTED, lw=0.8, zorder=1)
-            ax.text(x - BW / 2 + 0.3, y + 0.065, r.id + ("" if str(r.name) == r.id else "  " + textwrap.shorten(str(r.name), 22, placeholder="…")),
-                    ha="left", va="center", fontsize=6.3, color=INK, zorder=5,
-                    fontweight="bold" if crit else "normal")
-            ax.text(x - BW / 2 + 0.3, y - 0.1, f"{int(r.duration)} d  |  TF {int(r.total_float)}",
-                    ha="left", va="center", fontsize=5.8, color=MUTED, zorder=5)
-        if rows:
-            ax.plot([lx, lx], [y_area - 0.4, y], color=MUTED, lw=0.8, zorder=1)
-        if extra:
-            ax.text(x, y - LH * 0.8, f"+ {extra} more", ha="center", va="center", fontsize=7, color=MUTED)
-
-    ax.set_xlim(xs[0] - BW / 2 - 0.2, xs[-1] + BW / 2 + 0.2)
-    ax.set_ylim(y_area - 1.2 - shown * LH, 0.6)
-    ax.set_aspect("equal")
-    ax.axis("off")
-    ax.set_title(f"Work breakdown structure: {project}", loc="left", fontsize=12, color=INK, pad=10)
-    legend = [Patch(facecolor="white", edgecolor=RED, label="Critical activity (0 float)"),
-              Patch(facecolor="white", edgecolor="#b8bec7", label="Activity with float")]
-    ax.legend(handles=legend, frameon=False, fontsize=7.5, loc="upper right", ncol=2, bbox_to_anchor=(1, 1.06))
-    fig.tight_layout()
-    return fig
-
-
 def main():
     act, need = load()
     charts = [(gantt(act, need), "chart_gantt.png"), (readiness(need), "chart_utility_readiness.png"),
-              (slip(act), "chart_baseline_slip.png"), (wbs(act), "chart_wbs.png")]
+              (slip(act), "chart_baseline_slip.png")]
     links = load_links()
     if len(links):
         charts.append((network(act, links), "chart_network.png"))
