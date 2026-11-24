@@ -83,7 +83,10 @@ Each run:
 5. logs the run (time, status, finish, worst margin, error message) to `powerbi/refresh_log.csv`.
 
 Connect Power BI with the queries in `powerbi/queries.pq` (Power Query M, typed columns,
-plus suggested DAX measures). Schedule the run daily with Windows Task Scheduler:
+plus suggested DAX measures). Schedule the run daily with Windows Task Scheduler.
+`run_pipeline.bat` uses a virtual environment in the project folder if you made one
+(`python -m venv .venv` then `.venv\Scripts\pip install -r requirements.txt`), otherwise the
+`python` on your PATH:
 
 ```
 schtasks /Create /TN "Schedule health pipeline" /TR "C:\path\to\schedule-health\run_pipeline.bat" /SC DAILY /ST 06:00
@@ -104,8 +107,12 @@ Files can be `.csv` or `.xlsx`. Headers are not case sensitive, and the older co
 my_schedule.xlsx 2026-03-02` reads both sheets from one workbook; use `-` in place of the need
 dates file if the project has none.
 
-Link syntax in `predecessors` (separated by `;`): `A130` (finish-to-start), `A110SS+15`
-(start-to-start, 15-day lag), `A420FS+2`, `A500FF-3` (3-day lead).
+Link syntax in `predecessors` (separated by `;` or `,`): `A130` (finish-to-start), `A110SS+15`
+(start-to-start, 15-day lag), `A420FS+2`, `A500FF-3` (3-day lead). Spaces and lower case are
+fine, and ids may contain `-` or `.` (such as `CON-1010` or `1.2.3`): the longest id in the
+schedule that starts a link wins. Durations can be plain numbers or text such as `10 days`;
+part days round up to the next whole day. CSV files can be UTF-8 or the Windows encoding Excel
+uses for plain CSV.
 
 ## Outputs
 

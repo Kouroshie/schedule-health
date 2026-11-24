@@ -1,6 +1,7 @@
 out_*.csv
 out_*.txt
 __pycache__/
+.venv/
 powerbi/current/
 powerbi/history/
 powerbi/refresh_log.csv

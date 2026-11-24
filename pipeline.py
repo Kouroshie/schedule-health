@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from schedule_health import normalize_needs, read_table
+from schedule_health import normalize_needs, read_output, read_table
 
 HERE = Path(__file__).resolve().parent
 TABLES = {  # published name: output file from schedule_health.py
@@ -48,7 +48,7 @@ def run_engine(schedule, needs, start):
 
 
 def load_outputs():
-    t = {name: pd.read_csv(HERE / f) for name, f in TABLES.items()}
+    t = {name: read_output(HERE / f) for name, f in TABLES.items()}  # ids stay text: 1000, 0010
     for c in ("early_start", "early_finish", "late_finish", "baseline_finish"):
         t["activities"][c] = pd.to_datetime(t["activities"][c], format="mixed").dt.date
     for c in ("forecast_ready", "need_date"):
@@ -100,7 +100,7 @@ def write_atomic(df, path):
 
 def append_history(df, path, data_date):
     if path.exists():
-        old = pd.read_csv(path, dtype={"data_date": str})
+        old = pd.read_csv(path, dtype=str, keep_default_na=False)  # keep earlier rows exactly as written
         old = old[old["data_date"] != str(data_date)]  # rerun on the same date replaces it
         df = pd.concat([old, df.astype({"data_date": str})], ignore_index=True)
     write_atomic(df, path)
@@ -142,11 +142,15 @@ def main():
         for name, df in t.items():
             write_atomic(df, out / "current" / f"{name}.csv")
             append_history(df, out / "history" / f"{name}_history.csv", data_date)
-        if a.charts:
-            subprocess.run([sys.executable, str(HERE / "visualize.py")], check=True, capture_output=True)
+        message = "published"
+        if a.charts:  # the data is already published; a chart problem is reported, not a failed run
+            res = subprocess.run([sys.executable, str(HERE / "visualize.py")], capture_output=True, text=True)
+            if res.returncode != 0:
+                message += "; charts not redrawn: " + (res.stderr.strip().splitlines() or ["?"])[-1]
+                print("WARNING  " + message, file=sys.stderr)
         k = t["kpis"].iloc[0]
         log.update(status="OK", activities=len(t["activities"]), forecast_finish=k.forecast_finish,
-                   worst_margin_days=k.worst_margin_days, message="published")
+                   worst_margin_days=k.worst_margin_days, message=message)
         margin = "n/a" if pd.isna(k.worst_margin_days) else f"{int(k.worst_margin_days):+d} d"
         print(f"OK  data date {data_date}: {len(t['activities'])} activities, finish {k.forecast_finish}, "
               f"worst margin {margin}, {k.conflicts} conflict(s). Published to {out}")

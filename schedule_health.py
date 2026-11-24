@@ -14,16 +14,22 @@ Usage:
   SCHEDULE and NEED_DATES are .csv or .xlsx files (see templates/). Use - for NEED_DATES
   when the project has no need dates.
 
-Link syntax in the predecessors column, separated by ";":
+Link syntax in the predecessors column, separated by ";" (or ","):
   A130        finish-to-start, no lag
   A110SS+15   start-to-start with a 15-day lag
   A420FS+2    finish-to-start with a 2-day lag
   A500FF-3    finish-to-finish with a 3-day lead
+Spaces and lower case are fine (A110 ss + 15). Ids may contain - or . (CON-1010, 1.2.3):
+the longest id in the schedule that starts a link wins, so CON-1010 is the activity, not
+CON with a 1010-day lead.
 Durations are calendar days to keep the demo simple. P6 and MS Project use
 work calendars, which change the date math but not the logic.
 """
+import io
+import math
 import re
 import sys
+from collections import deque
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -31,51 +37,90 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 
-LINK = re.compile(r"^([A-Za-z0-9_]+?)(FS|SS|FF|SF)?([+-]\d+)?$")
+# What may follow the predecessor id in a link: optional type, optional signed lag in days.
+LINK_TAIL = r"(?:(FS|SS|FF|SF)\s*)?(?:([+-])\s*(\d+)\s*(?:d|days?)?)?"
+TAIL = re.compile(LINK_TAIL, re.I)
+LINK = re.compile(r"([A-Za-z0-9_]+?)\s*" + LINK_TAIL, re.I)   # used when the ids are not known
+DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)\s*(?:e?d|e?days?)?\s*\??", re.I)  # 10, 10d, 10 days, 10 days?
 WATCH_DAYS = 10        # margin below this many days = "watch"
 HIGH_FLOAT = 44        # DCMA high-float threshold (working days in DCMA)
 
 
-def parse_links(text):
+def _link(m, pred):
+    kind = (m.group(1) or "FS").upper()
+    lag = int(m.group(3) or 0) * (-1 if m.group(2) == "-" else 1)
+    return pred, kind, lag
+
+
+def parse_links(text, ids=None):
+    """Read a predecessors cell into (predecessor, type, lag) tuples. With ids (the schedule's
+    activity ids) the longest id that starts each link is used, so ids containing -, . or
+    letters such as SS or FF are read correctly, and an unknown predecessor is reported."""
     links = []
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
         return links
-    for raw in text.split(";"):
-        m = LINK.match(raw.strip())
+    for raw in re.split(r"[;,]", text):
+        raw = raw.strip()
+        if not raw:   # blank piece, e.g. a trailing ";"
+            continue
+        if ids is not None:
+            for i in range(len(raw), 0, -1):
+                pred = raw[:i].rstrip()
+                m = TAIL.fullmatch(raw[i:].strip()) if pred in ids else None
+                if m:
+                    links.append(_link(m, pred))
+                    break
+            else:
+                m = LINK.fullmatch(raw)
+                pred = m.group(1) if m else raw
+                raise ValueError(f"Unknown predecessor {pred}" + (f" (in link '{raw}')" if pred != raw else ""))
+            continue
+        m = LINK.fullmatch(raw)
         if not m:
             raise ValueError(f"Cannot read link '{raw}'")
-        pred, kind, lag = m.group(1), m.group(2) or "FS", int(m.group(3) or 0)
-        links.append((pred, kind, lag))
+        links.append(_link(m, m.group(1)))
     return links
 
 
 def topo_order(acts):
-    order, seen, temp = [], set(), set()
-
-    def visit(a):
-        if a in seen:
-            return
-        if a in temp:
-            raise ValueError(f"Logic loop found at {a}")
-        temp.add(a)
-        for p, _, _ in acts[a]["links"]:
-            visit(p)
-        temp.discard(a)
-        seen.add(a)
+    """Activities in logic order, every predecessor before its successors. Iterative (Kahn),
+    so very long chains work in any row order. Raises ValueError naming a logic loop."""
+    indeg = {a: 0 for a in acts}
+    succ = {a: [] for a in acts}
+    for a, A in acts.items():
+        for p, _, _ in A["links"]:
+            succ[p].append(a)
+            indeg[a] += 1
+    queue = deque(a for a in acts if indeg[a] == 0)
+    order = []
+    while queue:
+        a = queue.popleft()
         order.append(a)
-
-    for a in acts:
-        visit(a)
+        for s in succ[a]:
+            indeg[s] -= 1
+            if indeg[s] == 0:
+                queue.append(s)
+    if len(order) < len(acts):
+        # Walk back through unresolved predecessors until an activity repeats: that is a loop.
+        rest = {a for a in acts if indeg[a] > 0}
+        a, path, at = next(iter(rest)), [], {}
+        while a not in at:
+            at[a] = len(path)
+            path.append(a)
+            a = next(p for p, _, _ in acts[a]["links"] if p in rest)
+        loop = path[at[a]:][::-1]
+        raise ValueError("Logic loop: " + " > ".join(loop + [loop[0]]))
     return order
 
 
 def cpm(df):
-    acts = {r.id: {"dur": int(r.duration), "links": parse_links(r.predecessors)}
-            for r in df.itertuples()}
-    for a in acts.values():
-        for p, _, _ in a["links"]:
-            if p not in acts:
-                raise ValueError(f"Unknown predecessor {p}")
+    ids = set(df["id"])
+    acts = {}
+    for r in df.itertuples():
+        try:
+            acts[r.id] = {"dur": int(r.duration), "links": parse_links(r.predecessors, ids)}
+        except ValueError as e:
+            raise ValueError(f"{r.id}: {e}") from None
     order = topo_order(acts)
 
     # Forward pass: earliest start (ES) and earliest finish (EF), in days.
@@ -117,15 +162,17 @@ def cpm(df):
                 lf = min(lf, S["lf"] - lag + d)
         acts[a]["lf"], acts[a]["ls"] = lf, lf - d
 
-    # Free float: how far an activity can slip without moving any successor.
+    # Free float: how far an activity can slip without moving any successor or the project
+    # finish (the finish bound keeps free float from exceeding total float when an activity
+    # only has start-to-start or start-to-finish successors).
     for a in acts:
         A = acts[a]
-        ff = end - A["ef"] if not succs[a] else min(
+        ff = min([end - A["ef"]] + [
             (acts[s]["es"] - lag - A["ef"]) if k == "FS" else
             (acts[s]["es"] - lag - A["es"]) if k == "SS" else
             (acts[s]["ef"] - lag - A["ef"]) if k == "FF" else
             (acts[s]["ef"] - lag - A["es"])
-            for s, k, lag in succs[a])
+            for s, k, lag in succs[a]])
         A["tf"], A["ff"] = A["lf"] - A["ef"], ff
     return acts, succs, end
 
@@ -143,7 +190,33 @@ def read_table(src, sheet="schedule"):
         if sheet == "need_dates":
             return None
         return book.parse(0, dtype=str).fillna("")
-    return pd.read_csv(src, dtype=str).fillna("")
+    # CSV: accept UTF-8 (with or without the BOM Excel adds) and the Windows encoding Excel
+    # uses for plain "CSV", so names such as Café or an en dash do not stop the file.
+    raw = (src.getvalue() if hasattr(src, "getvalue") else
+           src.read() if hasattr(src, "read") else Path(src).read_bytes())
+    if isinstance(raw, str):
+        text = raw
+    else:
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+    return pd.read_csv(io.StringIO(text), dtype=str).fillna("")
+
+
+TEXT_COLUMNS = ("id", "name", "area", "milestone", "needed_by", "predecessor", "successor")
+
+
+def read_output(path):
+    """Read a CSV written by this tool with ids and names kept as text, so 1000 stays "1000"
+    and 0010 keeps its zeros (pandas would otherwise turn numeric-looking ids into numbers)."""
+    df = pd.read_csv(path, dtype={c: str for c in TEXT_COLUMNS}, keep_default_na=False, na_values=[""])
+    for c in TEXT_COLUMNS:
+        if c in df.columns:
+            df[c] = df[c].fillna("")
+    return df
 
 
 def _clean(table):
@@ -172,18 +245,24 @@ def normalize_schedule(df):
     dupes = df.loc[df["id"].duplicated(), "id"].unique()
     if len(dupes):
         raise ValueError("Duplicate activity id(s): " + ", ".join(dupes))
-    dur = pd.to_numeric(df["duration"], errors="coerce")
-    bad = df.loc[dur.isna() | (dur < 0), "id"].tolist()
+    # Plain numbers or text such as "10 days" / "10d" (MS Project). Part days round up to the
+    # next whole calendar day, since the work cannot finish sooner.
+    def days(text):
+        m = DURATION.fullmatch(text.strip())
+        return math.ceil(float(m.group(1)) - 1e-9) if m else None
+    dur = df["duration"].map(days)
+    bad = df.loc[dur.isna(), "id"].tolist()
     if bad:
-        raise ValueError("Duration must be a whole number of days (0 for a milestone). Check: "
-                         + ", ".join(bad[:10]))
-    df["duration"] = dur.round().astype(int).astype(str)
+        raise ValueError("Duration must be a number of calendar days, 0 or more (0 for a milestone). "
+                         "Check: " + ", ".join(bad[:10]))
+    df["duration"] = dur.astype(int).astype(str)
     return df[["id", "name", "area", "duration", "predecessors", "baseline_finish"]]
 
 
 def normalize_needs(need):
     """Tidy a need-date table. The milestone column may be called milestone or
-    utility_milestone; needed_by is optional. An empty or missing table is allowed."""
+    utility_milestone; needed_by is optional. An empty or missing table is allowed, and rows
+    with no milestone or no need date yet are skipped."""
     cols = ["milestone", "need_date", "needed_by"]
     if need is None or len(need) == 0:
         return pd.DataFrame(columns=cols)
@@ -194,7 +273,7 @@ def normalize_needs(need):
                          + ". Start from templates/need_dates_template.csv.")
     if "needed_by" not in need.columns:
         need["needed_by"] = ""
-    return need[need["milestone"] != ""][cols]
+    return need[(need["milestone"] != "") & (need["need_date"] != "")][cols]
 
 
 def analyze(df, need, start, watch_days=WATCH_DAYS, title="SCHEDULE HEALTH REPORT"):

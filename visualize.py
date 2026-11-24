@@ -23,7 +23,10 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Patch
 
+from schedule_health import read_output
+
 HERE = Path(__file__).resolve().parent
+MAX_PIXELS = 30000     # longest side of a saved chart; very large schedules get a lower dpi
 
 # Colors: one series blue for normal work, reserved status colors for meaning.
 BLUE = "#2a78d6"       # non-critical activity
@@ -63,14 +66,14 @@ def prepare(act, need):
 
 
 def load():
-    return prepare(pd.read_csv(HERE / "out_activities.csv"), pd.read_csv(HERE / "out_need_date_alignment.csv"))
+    return prepare(read_output(HERE / "out_activities.csv"), read_output(HERE / "out_need_date_alignment.csv"))
 
 
 def load_links():
     path = HERE / "out_links.csv"
     if not path.exists():
         return pd.DataFrame(columns=["predecessor", "successor", "type", "lag", "driving", "critical"])
-    links = pd.read_csv(path, dtype={"predecessor": str, "successor": str})
+    links = read_output(path)
     for c in ("driving", "critical"):
         links[c] = links[c].astype(str).str.upper().eq("TRUE")
     return links
@@ -81,8 +84,7 @@ def gantt(act, need, title="Schedule: critical path, float and need dates"):
     fig, ax = plt.subplots(figsize=(12, 0.34 * n + 1.8))
     y = range(n)
     day = pd.Timedelta(days=1)
-    need_by_id = need.set_index("milestone")["need_date"]
-    status_by_id = need.set_index("milestone")["status"]
+    need_by_id = need.groupby("milestone")["need_date"].min()  # a milestone two teams need: earliest date
 
     for i, r in zip(y, act.itertuples()):
         color = RED if r.critical else BLUE
@@ -132,9 +134,21 @@ def gantt(act, need, title="Schedule: critical path, float and need dates"):
 def readiness(need, watch_days=10):
     need = need.sort_values("margin_days")
     colors = {"CONFLICT": RED, "WATCH": AMBER, "OK": GREEN}
-    fig, ax = plt.subplots(figsize=(9, 0.55 * len(need) + 1.6))
-    labels = [short(n.replace(" (milestone)", "")) for n in need["name"]]
-    ax.barh(labels, need["margin_days"], color=[colors[s] for s in need["status"]], height=0.56, zorder=3)
+    fig, ax = plt.subplots(figsize=(9, 0.55 * max(len(need), 1) + 1.6))
+    if need.empty:
+        ax.text(0.5, 0.5, "No need dates given", ha="center", transform=ax.transAxes)
+        ax.axis("off")
+        ax.set_title("Milestone readiness vs need dates", loc="left", fontsize=12, color=INK, pad=10)
+        fig.tight_layout()
+        return fig
+    # One row per need date. A milestone needed by more than one team gets one row each,
+    # labeled with who needs it.
+    twice = need["milestone"].duplicated(keep=False)
+    labels = [short(str(r.name).replace(" (milestone)", "")
+                    + (f" ({r.needed_by or f'{r.need_date:%m/%d}'})" if t else ""))
+              for r, t in zip(need.itertuples(), twice)]
+    ax.barh(range(len(need)), need["margin_days"], color=[colors[s] for s in need["status"]], height=0.56, zorder=3)
+    ax.set_yticks(range(len(need)), labels)
     for i, r in enumerate(need.itertuples()):
         txt = f"{r.margin_days:+d} d  {r.status}  (ready {r.forecast_ready:%m/%d}, needed {r.need_date:%m/%d})"
         ax.annotate(txt, (max(r.margin_days, 0), i), xytext=(6, -3), textcoords="offset points", color=INK, fontsize=8)
@@ -401,7 +415,9 @@ def main():
     if len(links):
         charts.append((network(act, links), "chart_network.png"))
     for fig, name in charts:
-        fig.savefig(HERE / name, dpi=160, bbox_inches="tight")
+        # Very large schedules (1,000+ activities) would give images tens of thousands of pixels
+        # long that many viewers cannot open: lower the resolution to keep them in bounds.
+        fig.savefig(HERE / name, dpi=min(160, MAX_PIXELS / max(fig.get_size_inches())), bbox_inches="tight")
         plt.close(fig)
     print("wrote " + ", ".join(name for _, name in charts))
 

@@ -57,7 +57,7 @@ COL_HELP = {
     "id": "Unique activity code from your schedule.",
     "name": "Activity or milestone description.",
     "area": "Grouping you gave the activity: discipline, area, contractor or phase.",
-    "duration": "Calendar days. 0 means a milestone.",
+    "duration": "Calendar days (10 or 10 days). 0 means a milestone. Part days round up.",
     "predecessors": "Activities that must happen first. A100 = finish-to-start, A110SS+15 = "
                     "start-to-start with a 15-day lag, A130FF-3 = finish-to-finish with a 3-day lead.",
     "baseline_finish": "Finish date in the approved baseline schedule, used to measure slip.",
@@ -217,7 +217,7 @@ st.caption("Critical path, float, milestone readiness against need dates, baseli
 with st.expander("How to prepare your files"):
     st.markdown(
         "| File / sheet | Column | Required | What to enter |\n|---|---|---|---|\n"
-        "| schedule | `id` | yes | Unique activity code, e.g. A100 (letters, digits, _) |\n"
+        "| schedule | `id` | yes | Unique activity code, e.g. A100 or CON-1010 |\n"
         "| schedule | `name` | no | Activity description |\n"
         "| schedule | `area` | no | Any grouping: discipline, area, contractor, phase |\n"
         "| schedule | `duration` | yes | Whole calendar days, 0 for a milestone |\n"
