@@ -205,7 +205,7 @@ with st.sidebar:
     watch = st.number_input("WATCH when need-date margin is under (days)", 1, 120, WATCH_DAYS,
                             help="A milestone that is on time but with less margin than this is "
                                  "flagged WATCH instead of OK.")
-    st.caption("Durations are calendar days. Link syntax: A130 (finish-to-start), "
+    st.caption("Durations are calendar days (part days round up). Link syntax: A130 (finish-to-start), "
                "A110SS+15 (start-to-start, 15 d lag), A500FF-3 (finish-to-finish, 3 d lead). "
                "Separate links with ;")
 
@@ -220,7 +220,7 @@ with st.expander("How to prepare your files"):
         "| schedule | `id` | yes | Unique activity code, e.g. A100 or CON-1010 |\n"
         "| schedule | `name` | no | Activity description |\n"
         "| schedule | `area` | no | Any grouping: discipline, area, contractor, phase |\n"
-        "| schedule | `duration` | yes | Whole calendar days, 0 for a milestone |\n"
+        "| schedule | `duration` | yes | Calendar days, e.g. 10 or 10 days; 0 for a milestone. Part days round up |\n"
         "| schedule | `predecessors` | no | Links separated by `;` such as `A100`, `A110SS+15`, `A120FS+2`, `A130FF-3` |\n"
         "| schedule | `baseline_finish` | no | Baseline finish date, YYYY-MM-DD |\n"
         "| need_dates | `milestone` | yes | Activity id another team is waiting for |\n"
